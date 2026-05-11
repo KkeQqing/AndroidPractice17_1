@@ -43,4 +43,12 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
+    // OkHttp 网络框架
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // RecyclerView 列表控件
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
+    // Glide 图片加载
+    implementation("com.github.bumptech.glide:glide:4.16.0")
+
+
 }

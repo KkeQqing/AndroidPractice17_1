@@ -1,134 +1,123 @@
 package com.example.androidpractice17_1;
 
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.View;
+import android.widget.ListView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.recyclerview.widget.LinearLayoutManager;
-import androidx.recyclerview.widget.RecyclerView;
-import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
-import com.example.androidpractice17_1.adapter.NewsAdapter;
-import com.example.androidpractice17_1.bean.News;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
 import org.json.JSONArray;
 import org.json.JSONObject;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
 
-    private RecyclerView recyclerNews;
-    private SwipeRefreshLayout refreshLayout;
+    private ListView lvNews;
     private ProgressBar progressBar;
     private TextView tvError;
     private NewsAdapter adapter;
     private List<News> newsList = new ArrayList<>();
-    // 公共免费新闻接口（返回JSON数据）
-    private final String NEWS_URL = "https://v.juhe.cn/toutiao/index?type=top&key=5f52d7249a3ab49d6a0869c2d54b0580";
+    private ExecutorService executorService;
+    private Handler mainHandler;
+
+    // 免费测试新闻接口
+    private static final String API_URL = "https://jsonplaceholder.typicode.com/posts";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // 初始化控件
-        recyclerNews = findViewById(R.id.recycler_news);
-        refreshLayout = findViewById(R.id.refresh_layout);
-        progressBar = findViewById(R.id.progress_bar);
-        tvError = findViewById(R.id.tv_error);
+        initViews();
+        executorService = Executors.newSingleThreadExecutor();
+        mainHandler = new Handler(Looper.getMainLooper());
 
-        // 列表布局
-        recyclerNews.setLayoutManager(new LinearLayoutManager(this));
+        adapter = new NewsAdapter(newsList, getLayoutInflater());
+        lvNews.setAdapter(adapter);
 
-        // 下拉刷新
-        refreshLayout.setOnRefreshListener(this::getNewsData);
-
-        // 首次加载
-        getNewsData();
+        // 加载新闻
+        loadNewsData();
     }
 
-    // OkHttp请求新闻数据（子线程自动处理，满足要求3）
-    private void getNewsData() {
-        showLoading();
-        new Thread(() -> {
-            try {
-                OkHttpClient client = new OkHttpClient();
-                Request request = new Request.Builder().url(NEWS_URL).build();
-                Response response = client.newCall(request).execute();
+    private void initViews() {
+        lvNews = findViewById(R.id.lvNews);
+        progressBar = findViewById(R.id.progressBar);
+        tvError = findViewById(R.id.tvError);
+    }
 
-                if (response.isSuccessful() && response.body() != null {
-                    String json = response.body().string();
-                    // 解析JSON
-                    parseJson(json);
-                } else {
-                    runOnUiThread(() -> showError());
+    // 网络加载新闻数据
+    private void loadNewsData() {
+        progressBar.setVisibility(View.VISIBLE);
+        tvError.setVisibility(View.GONE);
+        lvNews.setVisibility(View.GONE);
+
+        executorService.execute(() -> {
+            String result = "";
+            try {
+                URL url = new URL(API_URL);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(5000);
+
+                BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(conn.getInputStream()));
+                String line;
+                StringBuilder sb = new StringBuilder();
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line);
                 }
+                result = sb.toString();
+                reader.close();
+                conn.disconnect();
+
+                // 解析JSON
+                List<News> list = new ArrayList<>();
+                JSONArray jsonArray = new JSONArray(result);
+                for (int i = 0; i < jsonArray.length(); i++) {
+                    JSONObject obj = jsonArray.getJSONObject(i);
+                    int id = obj.getInt("id");
+                    int userId = obj.getInt("userId");
+                    String title = obj.getString("title");
+                    String body = obj.getString("body");
+
+                    News news = new News(id, userId, title, body);
+                    list.add(news);
+                }
+
+                // 主线程更新UI
+                mainHandler.post(() -> {
+                    progressBar.setVisibility(View.GONE);
+                    lvNews.setVisibility(View.VISIBLE);
+                    adapter.updateData(list);
+                });
+
             } catch (Exception e) {
                 e.printStackTrace();
-                runOnUiThread(() -> showError());
+                mainHandler.post(() -> {
+                    progressBar.setVisibility(View.GONE);
+                    tvError.setVisibility(View.VISIBLE);
+                    Toast.makeText(this, "加载失败：" + e.getMessage(), Toast.LENGTH_SHORT).show();
+                });
             }
-        }).start();
+        });
     }
 
-    // 解析JSON数据
-    private void parseJson(String json) {
-        try {
-            newsList.clear();
-            JSONObject root = new JSONObject(json);
-            JSONObject result = root.getJSONObject("result");
-            JSONArray data = result.getJSONArray("data");
-
-            for (int i = 0; i < data.length(); i++) {
-                JSONObject obj = data.getJSONObject(i);
-                String title = obj.getString("title");
-                String time = obj.getString("date");
-                String content = obj.getString("author_name");
-                String imgUrl = obj.getString("thumbnail_pic_s");
-                String detail = obj.getString("url");
-
-                newsList.add(new News(title, time, content, imgUrl, detail));
-            }
-
-            // 主线程更新UI（满足要求5）
-            runOnUiThread(this::showNewsList);
-        } catch (Exception e) {
-            e.printStackTrace();
-            runOnUiThread(() -> showError());
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (!executorService.isShutdown()) {
+            executorService.shutdown();
         }
-    }
-
-    // 显示新闻列表
-    private void showNewsList() {
-        hideLoading();
-        tvError.setVisibility(View.GONE);
-        if (adapter == null) {
-            adapter = new NewsAdapter(this, newsList, news ->
-                    Toast.makeText(MainActivity.this, "新闻详情："+news.getDetail(), Toast.LENGTH_SHORT).show()
-            );
-            recyclerNews.setAdapter(adapter);
-        } else {
-            adapter.notifyDataSetChanged();
-        }
-    }
-
-    // 加载中
-    private void showLoading() {
-        if (!refreshLayout.isRefreshing()) progressBar.setVisibility(View.VISIBLE);
-    }
-
-    // 隐藏加载
-    private void hideLoading() {
-        progressBar.setVisibility(View.GONE);
-        refreshLayout.setRefreshing(false);
-    }
-
-    // 加载失败
-    private void showError() {
-        hideLoading();
-        tvError.setVisibility(View.VISIBLE);
     }
 }
